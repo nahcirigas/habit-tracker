@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>오늘의 습관</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    background: #F6F4EF;
+    color: #2B2926;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 40px 16px;
+  }
+  .app {
+    width: 100%;
+    max-width: 480px;
+  }
+  h1 {
+    font-size: 28px;
+    margin: 0 0 4px;
+    letter-spacing: -0.5px;
+  }
+  .date {
+    color: #8A8378;
+    font-size: 14px;
+    margin-bottom: 28px;
+  }
+  .add-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  .add-row input {
+    flex: 1;
+    padding: 12px 14px;
+    border: 1px solid #DDD7CB;
+    border-radius: 10px;
+    font-size: 15px;
+    background: #fff;
+  }
+  .add-row input:focus { outline: 2px solid #2B2926; }
+  .add-row button {
+    padding: 12px 18px;
+    border: none;
+    border-radius: 10px;
+    background: #2B2926;
+    color: #F6F4EF;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .add-row button:active { opacity: 0.8; }
+  .habit {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: #fff;
+    border: 1px solid #EAE5D9;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  .habit.done { border-color: #C7714A; background: #FBF0E9; }
+  .check {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2px solid #C9C2B3;
+    flex-shrink: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+  }
+  .habit.done .check {
+    background: #C7714A;
+    border-color: #C7714A;
+    color: #fff;
+    font-size: 14px;
+  }
+  .habit-name {
+    flex: 1;
+    font-size: 16px;
+  }
+  .habit.done .habit-name { color: #9A9387; text-decoration: line-through; }
+  .streak {
+    font-size: 13px;
+    color: #C7714A;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .del {
+    border: none;
+    background: none;
+    color: #BBB4A6;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px;
+  }
+  .empty {
+    color: #9A9387;
+    font-size: 14px;
+    text-align: center;
+    padding: 40px 0;
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+    <h1>오늘의 습관</h1>
+    <div class="date" id="todayLabel"></div>
+
+    <div class="add-row">
+      <input id="newHabit" type="text" placeholder="새 습관 이름 (예: 운동, 독서)" />
+      <button onclick="addHabit()">추가</button>
+    </div>
+
+    <div id="list"></div>
+  </div>
+
+<script>
+  // ---------- 날짜 유틸 (전부 로컬 시간 기준, UTC 변환 안 씀) ----------
+  function dateStr(offsetDays) {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const TODAY = dateStr(0);
+
+  // ---------- 저장소 ----------
+  // habits: [{id, name}]  -> 습관 목록은 날짜와 무관하게 한 번만 저장 (매일 다시 입력 안 함)
+  // completions: { "2026-06-24": ["id1","id2"], ... } -> 날짜별 완료한 habit id 배열
+  function loadHabits() {
+    return JSON.parse(localStorage.getItem('habits') || '[]');
+  }
+  function saveHabits(habits) {
+    localStorage.setItem('habits', JSON.stringify(habits));
+  }
+  function loadCompletions() {
+    return JSON.parse(localStorage.getItem('completions') || '{}');
+  }
+  function saveCompletions(c) {
+    localStorage.setItem('completions', JSON.stringify(c));
+  }
+
+  function isDone(id, offsetDays) {
+    const c = loadCompletions();
+    const arr = c[dateStr(offsetDays)] || [];
+    return arr.includes(id);
+  }
+
+  function toggleDone(id) {
+    const c = loadCompletions();
+    const key = TODAY;
+    if (!c[key]) c[key] = [];
+    if (c[key].includes(id)) {
+      c[key] = c[key].filter(x => x !== id);
+    } else {
+      c[key].push(id);
+    }
+    saveCompletions(c);
+    render();
+  }
+
+  // 오늘 아직 체크 안 했으면 어제부터 거꾸로 세고, 오늘 체크했으면 오늘부터 거꾸로 셈
+  function getStreak(id) {
+    let offset = isDone(id, 0) ? 0 : -1;
+    let count = 0;
+    while (isDone(id, offset)) {
+      count++;
+      offset--;
+    }
+    return count;
+  }
+
+  function addHabit() {
+    const input = document.getElementById('newHabit');
+    const name = input.value.trim();
+    if (!name) return;
+    const habits = loadHabits();
+    habits.push({ id: 'h_' + Date.now(), name });
+    saveHabits(habits);
+    input.value = '';
+    render();
+  }
+
+  function deleteHabit(id) {
+    if (!confirm('이 습관을 삭제할까요? (지난 기록도 함께 사라져요)')) return;
+    saveHabits(loadHabits().filter(h => h.id !== id));
+    const c = loadCompletions();
+    Object.keys(c).forEach(date => { c[date] = c[date].filter(x => x !== id); });
+    saveCompletions(c);
+    render();
+  }
+
+  function render() {
+    const habits = loadHabits();
+    const list = document.getElementById('list');
+    document.getElementById('todayLabel').textContent =
+      new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' });
+
+    if (habits.length === 0) {
+      list.innerHTML = '<div class="empty">아직 습관이 없어요. 위에서 추가해보세요.</div>';
+      return;
+    }
+
+    list.innerHTML = habits.map(h => {
+      const done = isDone(h.id, 0);
+      const streak = getStreak(h.id);
+      return `
+        <div class="habit ${done ? 'done' : ''}">
+          <div class="check" onclick="toggleDone('${h.id}')">${done ? '✓' : ''}</div>
+          <div class="habit-name">${h.name}</div>
+          <div class="streak">${streak > 0 ? streak + '일째 🔥' : ''}</div>
+          <button class="del" onclick="deleteHabit('${h.id}')">✕</button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  document.getElementById('newHabit').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addHabit();
+  });
+
+  render();
+</script>
+</body>
+</html>
