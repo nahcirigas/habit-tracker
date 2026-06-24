@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>오늘의 습관</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    background: #F6F4EF;
+    color: #2B2926;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 40px 16px;
+  }
+  .app { width: 100%; max-width: 480px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.5px; }
+  .date { color: #8A8378; font-size: 14px; margin-bottom: 14px; }
+
+  .fix-badges {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: #ECF3EC;
+    border: 1px solid #BFD9BF;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 22px;
+    font-size: 12.5px;
+    color: #2F5C3A;
+  }
+  .fix-badges b { color: #1F4A2A; }
+
+  .add-row { display: flex; gap: 8px; margin-bottom: 24px; }
+  .add-row input {
+    flex: 1; padding: 12px 14px; border: 1px solid #DDD7CB;
+    border-radius: 10px; font-size: 15px; background: #fff;
+  }
+  .add-row input:focus { outline: 2px solid #2B2926; }
+  .add-row button {
+    padding: 12px 18px; border: none; border-radius: 10px;
+    background: #2B2926; color: #F6F4EF; font-size: 15px; cursor: pointer;
+  }
+  .add-row button:active { opacity: 0.8; }
+
+  .habit {
+    display: flex; align-items: center; gap: 14px;
+    background: #fff; border: 1px solid #EAE5D9; border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 10px;
+  }
+  .habit.done { border-color: #C7714A; background: #FBF0E9; }
+  .check {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 2px solid #C9C2B3; flex-shrink: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; background: #fff;
+  }
+  .habit.done .check { background: #C7714A; border-color: #C7714A; color: #fff; font-size: 14px; }
+  .habit-name { flex: 1; font-size: 16px; }
+  .habit.done .habit-name { color: #9A9387; text-decoration: line-through; }
+  .streak { font-size: 13px; color: #C7714A; font-weight: 600; white-space: nowrap; }
+  .del {
+    border: none; background: none; color: #BBB4A6; font-size: 20px;
+    cursor: pointer; padding: 6px 8px; line-height: 1;
+  }
+  .del:active { color: #C7714A; }
+  .empty { color: #9A9387; font-size: 14px; text-align: center; padding: 40px 0; }
+  .storage-note { margin-top: 28px; font-size: 11.5px; color: #ADA89B; text-align: center; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <h1>오늘의 습관</h1>
+    <div class="date" id="todayLabel"></div>
+
+    <div class="fix-badges">
+      <div>🇰🇷 <b>KST(한국 표준시) 고정</b> — 기기 시간대 설정과 무관하게 항상 한국 시간 기준으로 날짜가 바뀝니다.</div>
+      <div>🔁 <b>습관 목록 자동 불러오기</b> — 한 번 추가한 습관은 날짜가 바뀌어도 매일 다시 입력할 필요 없이 그대로 유지됩니다.</div>
+      <div>🗑️ <b>삭제 버튼 수정</b> — ✕ 클릭 시 해당 습관과 그 기록만 정확히 삭제되도록 고쳤습니다.</div>
+    </div>
+
+    <div class="add-row">
+      <input id="newHabit" type="text" placeholder="새 습관 이름 (예: 운동, 독서)" />
+      <button id="addBtn">추가</button>
+    </div>
+
+    <div id="list"></div>
+
+    <div class="storage-note">
+      데이터는 서버 없이 이 브라우저의 localStorage에만 저장됩니다.<br>
+      같은 브라우저로 다시 열면 기록이 그대로 남아있고, 다른 기기/브라우저에서는 보이지 않습니다.
+    </div>
+  </div>
+
+<script>
+  // ---------- 날짜 유틸: 기기 시간대와 무관하게 항상 KST(한국)로 고정 ----------
+  function kstNow() {
+    // 기기가 미국/다른 시간대로 설정돼 있어도 항상 한국 시간 기준으로 강제 변환
+    return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+  }
+  function dateStr(offsetDays) {
+    const d = kstNow();
+    d.setDate(d.getDate() + offsetDays);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const TODAY = dateStr(0);
+
+  // ---------- 저장소 (localStorage, 두 키로 분리) ----------
+  // habits: [{id, name}]                 -> 습관 "목록" 자체는 날짜와 무관하게 한 번만 저장됨 (마스터 목록)
+  // completions: { "2026-06-24": [id,..] } -> 날짜별로 그날 완료한 habit id만 따로 기록
+  // => 날짜가 바뀌어도 habits는 그대로 유지되고, completions만 새 날짜 키로 쌓이는 구조라
+  //    "리셋" 문제(습관 목록 자체가 날아가는 문제)가 생기지 않음.
+  function loadHabits() { return JSON.parse(localStorage.getItem('habits') || '[]'); }
+  function saveHabits(h) { localStorage.setItem('habits', JSON.stringify(h)); }
+  function loadCompletions() { return JSON.parse(localStorage.getItem('completions') || '{}'); }
+  function saveCompletions(c) { localStorage.setItem('completions', JSON.stringify(c)); }
+
+  function isDone(id, offsetDays) {
+    const c = loadCompletions();
+    const arr = c[dateStr(offsetDays)] || [];
+    return arr.includes(id);
+  }
+
+  function toggleDone(id) {
+    const c = loadCompletions();
+    const key = TODAY;
+    if (!c[key]) c[key] = [];
+    c[key] = c[key].includes(id) ? c[key].filter(x => x !== id) : [...c[key], id];
+    saveCompletions(c);
+    render();
+  }
+
+  function getStreak(id) {
+    let offset = isDone(id, 0) ? 0 : -1;
+    let count = 0;
+    while (isDone(id, offset)) { count++; offset--; }
+    return count;
+  }
+
+  function addHabit() {
+    const input = document.getElementById('newHabit');
+    const name = input.value.trim();
+    if (!name) return;
+    const habits = loadHabits();
+    habits.push({ id: 'h_' + Date.now() + '_' + Math.floor(Math.random() * 1000), name });
+    saveHabits(habits);
+    input.value = '';
+    render();
+  }
+
+  function deleteHabit(id) {
+    saveHabits(loadHabits().filter(h => h.id !== id));
+    const c = loadCompletions();
+    Object.keys(c).forEach(date => { c[date] = c[date].filter(x => x !== id); });
+    saveCompletions(c);
+    render();
+  }
+
+  function render() {
+    const habits = loadHabits();
+    const list = document.getElementById('list');
+    document.getElementById('todayLabel').textContent =
+      kstNow().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }) + ' (KST)';
+
+    if (habits.length === 0) {
+      list.innerHTML = '<div class="empty">아직 습관이 없어요. 위에서 추가해보세요.</div>';
+      return;
+    }
+
+    list.innerHTML = habits.map(h => {
+      const done = isDone(h.id, 0);
+      const streak = getStreak(h.id);
+      return `
+        <div class="habit ${done ? 'done' : ''}">
+          <div class="check" data-id="${h.id}">${done ? '✓' : ''}</div>
+          <div class="habit-name">${h.name}</div>
+          <div class="streak">${streak > 0 ? streak + '일째 🔥' : ''}</div>
+          <button class="del" data-id="${h.id}">✕</button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // 이벤트 위임 방식으로 바인딩 (innerHTML을 다시 그려도 항상 정확히 동작)
+  document.getElementById('list').addEventListener('click', (e) => {
+    const checkEl = e.target.closest('.check');
+    const delEl = e.target.closest('.del');
+    if (checkEl) toggleDone(checkEl.dataset.id);
+    if (delEl) deleteHabit(delEl.dataset.id);
+  });
+
+  document.getElementById('addBtn').addEventListener('click', addHabit);
+  document.getElementById('newHabit').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addHabit();
+  });
+
+  render();
+</script>
+</body>
+</html>
